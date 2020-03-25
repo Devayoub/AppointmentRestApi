@@ -1,0 +1,44 @@
+{
+  "name": "appointement-api",
+  "version": "1.0.0",
+  "description": "appointement  Application - REST API",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "clear-db": "node src/clear-db.js",
+    "test-data": "node src/test-data.js"
+  },
+  "author": "ayoubbez",
+  "license": "none",
+  "devDependencies": {
+    "standard": "^12.0.1"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "bluebird": "^3.5.1",
+    "body-parser": "^1.15.1",
+    "config": "^3.0.0",
+    "cors": "^2.7.1",
+    "express": "^4.14.0",
+    "get-parameter-names": "^0.3.0",
+    "http-status-codes": "^1.4.0",
+    "joi": "^14.3.1",
+    "jsonwebtoken": "^8.3.0",
+    "lodash": "^4.17.15",
+    "moment": "^2.24.0",
+    "mongoose": "^5.8.9",
+    "mongoose-field-encryption": "^3.0.4",
+    "morgan": "^1.7.0",
+    "ms": "^2.1.2",
+    "nodemailer": "^4.7.0",
+    "nylas": "^4.8.0",
+    "superagent": "^5.2.1",
+    "validator": "^10.9.0",
+    "winston": "^3.1.0"
+  },
+  "engines": {
+    "node": "12.x"
+  }
+}
