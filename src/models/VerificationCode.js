@@ -1,6 +1,5 @@
 const config = require('config')
 const mongoose = require('mongoose')
-const encrypt = require('mongoose-field-encryption').fieldEncryption
 const validator = require('validator')
 
 /**
@@ -30,11 +29,6 @@ const schema = new mongoose.Schema({
 
 schema.index({ email: 1 })
 
-schema.plugin(encrypt,
-  {
-    fields: ['value', 'email', 'expiryDate'],
-    secret: config.ENCRYPTION_SECRET_KEY,
-    saltGenerator: secret => secret.slice(0, 16)
-  })
+
 
 module.exports = schema

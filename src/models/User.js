@@ -1,5 +1,4 @@
 const mongoose = require('mongoose')
-const encrypt = require('mongoose-field-encryption').fieldEncryption
 const validator = require('validator')
 const config = require('config')
 
@@ -61,11 +60,6 @@ const schema = new mongoose.Schema({
 schema.index({ email: 1 })
 schema.index({ role: 1 })
 
-schema.plugin(encrypt,
-  {
-    fields: ['email', 'firstName', 'lastName', 'passwordHash', 'nylasAccessToken', 'address', 'providerInfo', 'roles', 'isProvider', 'createdAt', 'updatedAt'],
-    secret: config.ENCRYPTION_SECRET_KEY,
-    saltGenerator: secret => secret.slice(0, 16)
-  })
+
 
 module.exports = schema

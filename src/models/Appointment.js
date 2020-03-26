@@ -1,5 +1,4 @@
 const mongoose = require('mongoose')
-const encrypt = require('mongoose-field-encryption').fieldEncryption
 const config = require('config')
 
 /**
@@ -29,11 +28,5 @@ const schema = new mongoose.Schema({
   }
 }, { timestamps: true })
 
-schema.plugin(encrypt,
-  {
-    fields: ['eventId', 'providerId', 'patientId', 'meetingId', 'meetingPassword', 'createdAt', 'updatedAt'],
-    secret: config.ENCRYPTION_SECRET_KEY,
-    saltGenerator: secret => secret.slice(0, 16)
-  })
 
 module.exports = schema

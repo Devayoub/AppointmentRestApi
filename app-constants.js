@@ -14,7 +14,7 @@ const VerificationCodeTypes = {
 const BooleanStrings = {
   True: 'true',
   False: 'false'
-}z
+}
 
 const ProviderFields = ['firstName', 'lastName', 'roles', 'address', 'providerInfo', 'createdAt', 'updatedAt']
 
