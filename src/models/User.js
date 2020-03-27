@@ -1,65 +1,64 @@
+const _ = require('lodash')
+const { Roles } = require('../constants')
 const mongoose = require('mongoose')
-const validator = require('validator')
-const config = require('config')
 
 /**
  * The User schema.
+ * @class User
+ *
+ * A user of the application.  Can either be patient and/or physician and/or  admin
  */
 const schema = new mongoose.Schema({
+
   email: {
     required: true,
+    type: String
+  },
+  role: {
+    required: false,
+    type: String
+
+  },
+  password: {
+    required: false,
+    type: String
+  },
+  isActive: {
+    required: false,
     type: String,
-    unique: true,
-    validate: {
-      validator: validator.isEmail,
-      message: 'email is invalid',
-      isAsync: false
-    }
+    type: String
   },
-  firstName: {
+  verificationCode: {
     required: false,
     type: String
   },
-  lastName: {
+  verificationCodeValideUntil: {
+    required: false,
+    type: Date
+  },
+  sessionId: {
     required: false,
     type: String
   },
-  passwordHash: {
-    required: true,
-    type: String
-  },
-  nylasAccessToken: {
+  calendarId: {
     required: false,
-    type: String
-  },
-  address: {
-    required: false,
-    type: String
-  },
-  providerInfo: {
-    qualifications: {
-      required: false,
-      type: [String]
-    },
-    biography: {
-      required: false,
-      type: String
-    }
-  },
-  roles: {
-    required: true,
-    type: [String]
-  },
-  // String value for isProvider is used for providers searching
-  isProvider: {
-    required: true,
     type: String
   }
-}, { timestamps: true })
+},
+{ timestamps: true,
+  toJSON: {
+    transform: function (doc, ret) {
+      if (ret._id) {
+        ret.id = String(ret._id)
+        delete ret._id
+      }
+      delete ret.__v
+      if (ret.gpSessionId) {
+        delete ret.gpSessionId
+      }
+      return ret
+    }
+  }
+})
 
-schema.index({ email: 1 })
-schema.index({ role: 1 })
-
-
-
-module.exports = schema
+module.exports = mongoose.model('User', schema)

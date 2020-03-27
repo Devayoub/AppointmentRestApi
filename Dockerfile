@@ -5,4 +5,6 @@ COPY package.json /usr/src/app/
 RUN npm install
 COPY . /usr/src/app
 EXPOSE 3000
+RUN mongod
+CMD [ "npm", "test-data" ]
 CMD [ "npm", "start" ]

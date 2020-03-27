@@ -1,34 +1,33 @@
-const config = require('config')
+const _ = require('lodash')
+const { Roles } = require('../constants')
 const mongoose = require('mongoose')
-const validator = require('validator')
 
 /**
- * The verification code schema.
- * It contains the user email and verification code value along with its expiry date.
+ * The User schema.
+ * @class Verification Code
+ *
  */
 const schema = new mongoose.Schema({
-  value: {
+
+  email: {
     required: true,
     type: String
   },
-  email: {
-    required: true,
-    type: String,
-    unique: true,
-    validate: {
-      validator: validator.isEmail,
-      message: 'email is invalid',
-      isAsync: false
-    }
+  code: {
+    required: false,
+    type: String
+
   },
-  expiryDate: {
-    required: true,
-    type: Date
+  validUntil: {
+    required: false,
+    type: String
+  },
+  used: {
+    required: false,
+    type: Boolean,
+    default:false
   }
+  
 })
 
-schema.index({ email: 1 })
-
-
-
-module.exports = schema
+module.exports = mongoose.model('VerificationCode', schema)

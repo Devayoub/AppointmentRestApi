@@ -1,42 +1,88 @@
 /**
- * This controllers handles the appointment related endpoints
+ * Staff service
  */
-const HttpStatus = require('http-status-codes')
-const service = require('../services/AppointmentService')
+
+const _ = require('lodash')
+const AppointmentsService = require('../services/coabyagreementsService')
 
 /**
- * Handles the create appointment request.
- *
- * @param {Object} req The http request
- * @param {Object} res The http response
+ * AvailableSchedule
+ * @param {Object} req request
+ * @param {Object} res response
  */
-async function createAppointment (req, res) {
-  res.status(HttpStatus.CREATED).json(await service.createAppointment(req.user.email, req.body))
+const AvailableSchedule = async (req, res) => {
+  res.send(await AppointmentService.AvailableSchedule(req.params.id, req.body.day))
 }
 
 /**
- * Handles the request for getting the appointment of a given user.
- *
- * @param {Object} req The http request
- * @param {Object} res The http response
+ * Make Appointments
+ * @param {Object} req request
+ * @param {Object} res response
  */
-async function getAppointments (req, res) {
-  res.send(await service.getAppointments(req.user.email, req.query.type))
+const MakeAppointments = async (req, res) => {
+  res.send(await AppointmentService.MakeAppointments(req.authUser.id, req.params.id, req.body))
 }
 
 /**
- * Handles the request for updating an appointment.
- *
- * @param {Object} req The http request
- * @param {Object} res The http response
+ * update Appointment
+ * @param {Object} req request
+ * @param {Object} res response
  */
-async function updateAppointment (req, res) {
-  await service.updateAppointment(req.user.id, req.params.appointmentId, req.body)
-  res.end()
+const updateAppointment = async (req, res) => {
+  res.send(await AppointmentService.updateAppointment(req.authUser.id, req.params.id, req.body, 'update'))
+}
+
+/**
+ * Mark as completed Appointment
+ * @param {Object} req request
+ * @param {Object} res response
+ */
+const MarkCompleted = async (req, res) => {
+  res.send(await AppointmentService.updateAppointment(req.authUser.id, req.params.id, req.body, 'complete'))
+}
+/**
+ * Cancel Appointment
+ * @param {Object} req request
+ * @param {Object} res response
+ */
+const CancelAppointment = async (req, res) => {
+  res.send(await AppointmentService.updateAppointment(req.authUser.id, req.params.id, req.body, 'cancel'))
+}
+
+/**
+ * upcoming Appointment
+ * @param {Object} req request
+ * @param {Object} res response
+ */
+const upcomingAppointment = async (req, res) => {
+  res.send(await AppointmentService.AppointmentList(req.authUser.id, 'upcoming'))
+}
+
+/**
+ * Past Appointment
+ * @param {Object} req request
+ * @param {Object} res response
+ */
+const PastAppointment = async (req, res) => {
+  res.send(await AppointmentService.AppointmentList(req.authUser.id, 'past'))
+}
+
+/**
+ * retirieve calendar list to let user choise one of them
+ * @param {Object} req request
+ * @param {Object} res response
+ */
+const getCalendarList = async (req, res) => {
+  res.send(await AppointmentService.getCalendarList())
 }
 
 module.exports = {
-  createAppointment,
-  getAppointments,
-  updateAppointment
+  MakeAppointments,
+  updateAppointment,
+  upcomingAppointment,
+  PastAppointment,
+  getCalendarList,
+  AvailableSchedule,
+  MarkCompleted,
+  CancelAppointment
 }

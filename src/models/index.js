@@ -1,31 +1,35 @@
-/**
- * Initialize and exports all models.
+/*
+ * Init Mongo DB models
  */
+
+const config = require('config')
 const fs = require('fs')
 const path = require('path')
-const config = require('config')
-const mongoose = require('mongoose')
-mongoose.Promise = global.Promise || require('bluebird')
-const conn = mongoose.createConnection(config.MONGODB_URI, { useNewUrlParser: true })
+
+require('../datasource').getDb('mongodb://localhost:27017/ognomy')
+
 const models = {}
 
 // Bootstrap models
 fs.readdirSync(__dirname).forEach((file) => {
   if (file !== 'index.js') {
     const filename = file.split('.')[0]
-    const schema = require(path.join(__dirname, filename))
-    const model = conn.model(filename, schema)
+    const model = require(path.join(__dirname, filename))
     models[filename] = model
-
-    model.schema.options.minimize = false
-    model.schema.options.toJSON = {
-      transform: (doc, ret) => {
-        if (ret._id) {
-          ret.id = String(ret._id)
-          delete ret._id
+    if (model.schema) {
+      model.schema.options.minimize = false
+      // If toJSON is not defined at Model level, define general rule
+      if (!model.schema.options.toJSON) {
+        model.schema.options.toJSON = {
+          transform: (doc, ret) => {
+            if (ret._id) {
+              ret.id = String(ret._id)
+              delete ret._id
+            }
+            delete ret.__v
+            return ret
+          }
         }
-        delete ret.__v
-        return ret
       }
     }
   }

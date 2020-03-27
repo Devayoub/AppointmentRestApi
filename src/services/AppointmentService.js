@@ -1,358 +1,309 @@
 /**
- * This service provides functions for appointments management
+ * Appointment service
  */
-const config = require('config')
+
 const _ = require('lodash')
-const moment = require('moment')
-const Joi = require('joi')
-const constants = require('../../app-constants')
+const config = require('config')
+
+const bcrypt = require('bcryptjs')
+const errors = require('http-errors')
+const joi = require('joi')
+const Nylas = require('nylas');
+
+const { User,Appointment } = require('../models')
 const helper = require('../common/helper')
-const errors = require('../common/errors')
-const logger = require('../common/logger')
-const nylasService = require('../services/NylasService')
-const Appointment = require('../models').Appointment
-const User = require('../models').User
+
+Nylas.config({
+  clientId: config.nylas.CLIENT_ID,
+  clientSecret: config.nylas.CLIENT_SECRET,
+});
+const nylas = Nylas.with(config.nylas.TOKEN);
+
+
+
+
 
 /**
- * This private function creates an calendar event for a given user.
- *
- * @param {Object} user The user for whom to create the event
- * @param {Array} participants The array of the event participants
- * @param {Object} when The object holding the event start_time and end_time
- * @param {String} guestName The event guest name
- * @returns {Object} The created event
+ * AvailableSchedule
+ * @param {String} ProviderId ProviderId
+ * @returns {Object} Free and busy times
  */
-async function _createEventForUser (user, participants, when, guestName) {
-  // Check if user is bound to Nylas
-  await nylasService.isUserBoundToNylas(user)
+const AvailableSchedule = async (ProviderId,day) => {
+ var start = new Date(day)
+ var end = new Date(day)
+ start.setHours(09,00)
+ end.setHours(09,30)
+ var busy = []
+ var timeslots = []
+ timeslots.push([start,end])
+ var free = []
 
-  // Get the calendarId
-  const calendarId = await nylasService.getOgnomyCalendarId(user.nylasAccessToken, user.email)
 
-  // Create the event for the user in Nylas API
-  return nylasService.createEvent(
-    user.nylasAccessToken,
-    config.MEETING_TITLE_TEMPLATE.replace('{participant}', guestName),
-    config.MEETING_DESCRIPTION_TEMPLATE.replace('{participant}', guestName),
-    calendarId,
-    participants,
-    when)
-}
+ // Set default time slots
+ for(i=1;i<=16;i++){
+   let time = []
+   start = new Date(end.getTime())
+   end = new Date(start.getTime() + 30 * 60000)
+   time.push(start)
+   time.push(end)
+   timeslots.push(time)
 
-/**
- * Creates an appointment using the specified data.
- *
- * @param {Object} data The appointment data to create
- * @returns {Object} an object with the id of the created appointment
- */
-async function createAppointment (email, data) {
-  // Get the logged-in user entity from the database (The user who creates the appointment)
-  let users = await helper.searchEntities(User, { email })
-  const loggedInUser = users[0]
+   
+  
+ }
 
-  // Get the invitee entity from the database
-  users = await helper.searchEntities(User, { email: data.inviteeEmail })
+ const provider = await helper.ensureExists(User,ProviderId)
+ if(!provider.calendarId) throw new errors.BadRequest("Provider must have a calendar")
+ const calendarId = provider.calendarId
+ starts_after=new Date(day).setHours(09,00)/1000
+ starts_before=new Date(day).setHours(18,00)/1000
 
-  if (!users || users.length === 0) {
-    throw new errors.NotFoundError(`User with email ${data.inviteeEmail} does not exist`)
-  }
-  const invitee = users[0]
 
-  if (_.includes(loggedInUser.roles, constants.UserRoles.Physician) &&
-     _.includes(invitee.roles, constants.UserRoles.Physician)) {
-    // Both the logged in user and the invitee are providers
-    throw new errors.BadRequestError(`A provider is not allowed to schedule an appointment with another provider`)
-  }
-
-  if (_.includes(loggedInUser.roles, constants.UserRoles.Patient) &&
-     _.includes(invitee.roles, constants.UserRoles.Patient)) {
-    throw new errors.BadRequestError(`A patient is not allowed to schedule an appointment with another patient`)
-  }
-
-  // detect who is the provider (logged-in user or invitee)
-  let provider
-  let patient
-  if (_.includes(loggedInUser.roles, constants.UserRoles.Physician)) {
-    // The logged-in user is the provider
-    provider = loggedInUser
-    patient = invitee
-  } else {
-    // The logged-in user is the patient
-    provider = invitee
-    patient = loggedInUser
-  }
-
-  // TODO - Currently the patient name is not stored in the db ( not provided when creating an account)
-  // TODO - So, we user the patient email as participant name for now
-  const patientName = patient.email
-  const participants = [{ name: patientName, email: patient.email }]
-
-  // Construct the when parameter (with start/end times)
-  const when = {
-    start_time: moment(data.startTime, moment.ISO_8601).unix(),
-    end_time: moment(data.endTime, moment.ISO_8601).unix()
-  }
-
-  // Create the event for the Provider in Nylas
-  const event = await _createEventForUser(provider, participants, when, patientName)
-
-  // Save the Appointment into the database
-  const appointment = new Appointment({
-    eventId: event.id,
-    providerId: provider.id,
-    patientId: patient.id
-  })
-
-  await appointment.save()
-
-  return { appointmentId: appointment.id }
-}
-
-createAppointment.schema = {
-  email: Joi.email(),
-  data: Joi.object().keys({
-    inviteeEmail: Joi.email(),
-    startTime: Joi.string().required(),
-    endTime: Joi.string().required()
-  })
-}
-
-/**
- * Gets the appointments for the user identified by the given email.
- * The appointments are filtered by the specified type (past, upcoming or ongoing)
- *
- * @param {String} email The email address of the user for whom to get the appointments.
- * @param {String} type The appointment types to get, should be one of 'past', 'upcoming' or 'ongoing'
- */
-async function getAppointments (email, type) {
-  // Get the user from the database.
-  const users = await helper.searchEntities(User, { email })
-
-  await helper.checkNullOrEmptyArray(users, `User with email ${email} does not exist`)
-
-  // check the user role
-  const isProvider = _.includes(users[0].roles, constants.UserRoles.Physician)
-
-  // check if the provider is bound to Nylas
-  if (isProvider) {
-    await nylasService.isUserBoundToNylas(users[0])
-  }
-
-  let events = []
-  let searchCriteria = {}
-
-  const currentTimestamp = moment().unix()
-
-  switch (type) {
-    case constants.AppointmentTypes.Upcoming:
-      // get upcoming events
-      searchCriteria = { starts_after: currentTimestamp }
-      break
-    case constants.AppointmentTypes.Past:
-      searchCriteria = { ends_before: currentTimestamp }
-      break
-    case constants.AppointmentTypes.Ongoing:
-      searchCriteria = {
-        starts_before: currentTimestamp,
-        ends_after: currentTimestamp
+  events = await nylas.events.list({calendar_id:calendarId,starts_after,starts_before})
+  
+    _.each(events,(event)=>{
+      if(event.busy){
+     
+        busy.push([new Date(event.when.start_time*1000),new Date(event.when.end_time*1000)])
+        
       }
-      break
-    default:
-      throw new errors.BadRequestError(`Unsupported appointment type ${type}`)
-  }
+    })
+   let free1 = timeslots.filter((x)=>{
+     let bool = false
+        busy.forEach((e) => {
+           if((Number(x[0])-Number(e[0]) !== 0) && (Number(x[1])-Number(e[1]) !== 0))
+           {
+             bool = true
+             return
+           }
 
-  if (isProvider) {
-    events = await nylasService.listUserEvents(users[0].nylasAccessToken, users[0].email, searchCriteria)
-    return _formatProviderAppointments(events)
-  } else {
-    return _getPatientAppointments(users[0], searchCriteria)
-  }
+        });
+        return bool
+        
+   } )
+  
+   return {busy,free1}
+  
+
+
 }
 
-getAppointments.schema = {
-  email: Joi.email(),
-  type: Joi.string().required()
-}
+AvailableSchedule.schema = {
 
-/**
- * This private function lists the patient appointments for the Nylas events that match the given search criteria
- *
- * @param {Object} patient The patient (User) entity for which to search th events
- * @param {Object} searchCriteria The events search criteria
- */
-async function _getPatientAppointments (patient, searchCriteria) {
-  // Get the list of the patient appointments from the database
-  const dbAppointments = await helper.searchEntities(Appointment, { patientId: patient.id })
-  const result = []
-
-  for (const appointment of dbAppointments) {
-    // Get the provider with whom the appointment is scheduled
-    const provider = await User.findById(appointment.providerId)
-
-    // add the event id to the search criteria
-    searchCriteria.event_id = appointment.eventId
-
-    // Get the event from nylas using the provider token
-    const events = await nylasService.listUserEvents(provider.nylasAccessToken, provider.email, searchCriteria)
-
-    if (events.length > 0) {
-      // The event matches the search criteria, we add it to the result array
-      const event = _.pick(events[0], constants.CalendarEventFields)
-      event.when = {}
-      event.when.startTime = moment.unix(events[0].when.start_time).toISOString()
-      event.when.endTime = moment.unix(events[0].when.end_time).toISOString()
-
-      result.push({
-        ..._.pick(appointment, constants.AppointmentFields),
-        ...{ event } })
-    }
-  }
-
-  return result
+  ProviderId: joi.string(),
+  day:joi.string()
 }
 
 /**
- * This private function gets and properly formats the provider appointments using the specified events
- *
- * @param {Object} events the events for which to populate the corresponding appointments.
- * @returns an array of the user appointments with the corresponding calendar events
+ * Make Appointments
+ * @param {Object} data Data to create Staff
+ * @returns {Object} Created Staff
  */
-async function _formatProviderAppointments (events) {
-  const appointments = []
+const MakeAppointments = async (clientId,providerId,data) => { 
 
-  for (const event of events) {
-    const res = _.pick(event, constants.CalendarEventFields)
+  const provider = await  helper.ensureExists(User,providerId)
+  if(!provider.calendarId) throw new errors.BadRequest('provider has no calendar ')
+  const client =await  helper.ensureExists(User,clientId)
+  if(!client.calendarId) throw new errors.BadRequest('User has no calendar ')
+ 
+  start_time = new Date(data.time)
+  end_time = new Date(start_time)
+  end_time.setMinutes(end_time.getMinutes()+30);
 
-    res.when = {}
-    res.when.startTime = moment.unix(event.when.start_time).toISOString()
-    res.when.endTime = moment.unix(event.when.end_time).toISOString()
+  
+const event_provider = nylas.events.build({
+  title: data.title,
+  calendarId:provider.calendarId,
+  // Event times are set via UTC timestamps
+  when: { start_time, end_time },
+  // Participants are stored as an array of participant subobjects
+  participants: [{ email: client.email, name:  client.name }],
+  busy : true
+});
+event_provider.busy = true;
+event_provider.save()
+  .catch(
+    (err)=>{throw new errors.BadRequest(err)}
+  )
+  const event_client = nylas.events.build({
+    title: data.title,
+    calendarId:provider.calendarId,
+    // Event times are set via UTC timestamps
+    when: { start_time, end_time },
+    // Participants are stored as an array of participant subobjects
+    participants: [{ email: provider.email, name:  provider.name }],
+  
+  });
+  event_client.busy = true;
+  event_client.save()
+  .catch(
+    (err)=>{throw new errors.BadRequest(err)}
+    )
+ return Appointment.create({clientId,providerId,event_client_id:event_client.id,event_provider_id:event_provider.id})
+}
 
-    const dbAppointments = await helper.searchEntities(Appointment, { eventId: event.id })
-
-    // Check the retrieved appointment from the database
-    await helper.checkNullOrEmptyArray(dbAppointments, `Appointment not found for event with id = ${event.id}`)
-
-    appointments.push({
-      ..._.pick(dbAppointments[0], constants.AppointmentFields),
-      ...{ event: res } })
-  }
-  return appointments
+MakeAppointments.schema = {
+  clientId: joi.string().required(),
+  providerId: joi.string().required(),
+  data: joi.object({
+      title:joi.string().required(),
+      time:joi.date().required()
+  })
 }
 
 /**
- * Updates an appointment identified by the given appointment id using the specified data.
- *
- * @param {String} userId The id of the user for whom to update the appointment
- * @param {String} appointmentId The id of the appointment to update
- * @param {Object} data The data to use for updating the appointment
+ * update Appointment
+ * @param {String} patientId patientId
+ * @param {String} providerId
+ * @returns {Object} result
  */
-async function updateAppointment (userId, appointmentId, data) {
-  const user = await User.findById(userId)
+const updateAppointment = async (currentUserId,eventId,data,type) => {
+  const currentUser = await helper.ensureExists(User,currentUserId)
+  const calendarId = currentUser.calendarId
+  let appointment
+  
+  try{
+    events = await  nylas.events.list()
 
-  // Check if the logged-in user is a provider
-  const isProvider = _.includes(user.roles, constants.UserRoles.Physician)
-
-  // If the loggedIn user is a provider, we check the linking with Nylas
-  if (isProvider) {
-    await nylasService.isUserBoundToNylas(user)
   }
-
-  // Check if the user has permissions to update the appointment and get the appointment entity
-  const appointment = await _checkAppointmentOwnership(appointmentId, userId, isProvider)
-
-  let providerNylasToken
-  if (isProvider) {
-    providerNylasToken = user.nylasAccessToken
-  } else { // The user is a patient, both roles are exclusive
-    // Get the provider to get its token
-    const provider = await User.findById(appointment.providerId)
-    providerNylasToken = provider.nylasAccessToken
-  }
-
-  // Get the event from Nylas
-  const event = await nylasService.findEventById(providerNylasToken, appointment.eventId)
-
-  // Construct the when parameter (with start/end times)
-  const when = {
-    start_time: moment(data.startTime, moment.ISO_8601).unix(),
-    end_time: moment(data.endTime, moment.ISO_8601).unix()
-  }
-
-  // Set the updated dates
-  event.when = when
-
-  // update the busy flag for the event
-  if (data.markAsCompleted) {
-    event.busy = false
-  }
-
-  // we update the title/description for the event
-  event.title = data.title
-  event.description = data.description
-
-  if (isProvider) {
-    if (!_.isNil(data.meetingId)) {
-      appointment.meetingId = data.meetingId
+  catch(err){
+     throw new errors.InternalServerError(err)
     }
-    if (!_.isNil(data.meetingPassword)) {
-      appointment.meetingPassword = data.meetingPassword
+   const event = events.filter((ev)=> ev.id == eventId)[0]
+   
+   if(!event){
+      throw new errors.NotFound('event not found')
     }
-  } else {
-    // The user is a patient
-    if (!_.isNil(data.meetingId) || !_.isNil(data.meetingPassword)) {
-      throw new errors.ForbiddenError(
-        `You are not allowed to update appointment meetingId/meeting password, Only providers can do it`)
-    }
+  
+  if(calendarId !== event.calendarId) throw new errors.Unauthorized('Action not authorized')
+  if(currentUser.role === 'Provider'){
+   //  appointment =await helper.ensureExists(Appointment,{event_provider_id:eventId})
+
   }
+  else
+  {
+   // appointment =await helper.ensureExists(Appointment,{event_client_id:eventId})
 
-  // save the event in nylas
-  await event.save()
+  }
+  if(type === 'update'){
 
-  // Save the appointment to the database
-  await appointment.save()
+      event.title = data.title||event.title
+      event.description = data.description||event.description
+      event.when= data.when || event.when
+
+  }
+  if(type === 'cancel'){
+    event.status = 'cancelled'
+   
+  }
+  if(type === 'complete'){
+    if(currentUser.role !== 'Provider') throw new errors.Unauthorized('Action not authorized')
+
+      event.title ='DONE_'.concat(event.title)
+     
+      return event
+  }
+  return event
 }
 
 updateAppointment.schema = {
-  userId: Joi.string().required(),
-  appointmentId: Joi.string().required(),
-  data: Joi.object().keys({
-    startTime: Joi.string().required(),
-    endTime: Joi.string().required(),
-    markAsCompleted: Joi.boolean(),
-    title: Joi.string(),
-    description: Joi.string(),
-    meetingId: Joi.string(),
-    meetingPassword: Joi.string()
-  })
+  currentUserId: joi.string().required(),
+  eventId: joi.string().required(),
+  data: joi.object({
+   title: joi.string(),
+    description: joi.string(),
+    when: joi.object({
+      start_time :joi.date(),
+      end_time:joi.date()
+    })
+  }),
+  type:joi.string().required(),
 }
+
+
 
 /**
- * This private function checks whether the user identified by the given userId has update permissions on the appointment
- *
- * @param {String} appointmentId The id of the appointment for which to check the ownership
- * @param {String} userId The id of the user to for whom to check the ownership
- * @param {Boolean} isProvider The flag indicating whether the user is a provider or no
+ *  Appointment List (Upcoming/Past Appointments)
+ * @param {String} Id (physician or patient) 
+ * @param {String} type (Upcoming Or Past) 
+ * @returns {Object} Appointment list
  */
-async function _checkAppointmentOwnership (appointmentId, userId, isProvider) {
-  // Find the appointment
-  const appointment = await Appointment.findById(appointmentId)
+const AppointmentList = async (id,type) => {
+  const user =await  helper.ensureExists(User,id)
+  calendar_id = user.calendarId
+    let list
 
-  if (_.isNil(appointment)) {
-    throw new errors.NotFoundError(`Appointment with id ${appointmentId} does not exist`)
-  }
+  await nylas.events.list({calendar_id}).then(events => {
+    if(type==='past'){
+     
+      list = events.filter((ev)=> new Date(ev.start*1000)-Date.now()>0)
 
-  // provider and patient roles are exclusive
-  if ((isProvider && appointment.providerId !== userId) ||
-        (!isProvider && appointment.patientId !== userId)) {
-    throw new errors.ForbiddenError(`You are not allowed to update this appointment`)
-  }
-  return appointment
+    }
+    else {
+      list = events.filter((ev)=> new Date(ev.start*1000)-Date.now()<=0)
+    }
+
+    for (let event of events) {
+  
+      
+        
+       
+    }
+  })
+  .catch((err)=>{ throw new errors.BadRequest(err)}
+  
+  )
+
+  return list
 }
 
+AppointmentList.schema = {
+  id: joi.id().required(),
+  type:joi.string()
+}
+/**
+ * retrieve calendar list 
+ * @returns {Object} calendar list
+ */
+const getCalendarList = async () => {
+  
+
+// Get all calendars found in the user's account
+const list = []
+ await nylas.calendars.list().then((calendars) =>{
+  
+_.each(calendars,(c)=>{
+
+   list.push({id:c.id,name:c.name})
+})
+
+ } );
+return list
+}
+
+
+
+/**
+ * Set default calendar
+ * @returns {String} Message Status
+ */
+const setDefaultCalendar = async (userId,calendarId) => {
+
+  const user =await  helper.ensureExists(User,userId)
+  return user.update({
+    calendarId: calendarId
+  })
+
+}
+setDefaultCalendar.schema = {
+  userId: joi.id().required(),
+  calendarId: joi.id().required(),
+}
 module.exports = {
-  createAppointment,
-  getAppointments,
-  updateAppointment
+  MakeAppointments,
+  updateAppointment,
+  AppointmentList,
+  getCalendarList,
+  setDefaultCalendar,
+  AvailableSchedule
 }
-
-logger.buildService(module.exports)

@@ -1,63 +1,61 @@
+
 /**
  * The application entry point
  */
 
-require('./app-bootstrap')
-
+require('./src/bootstrap')
 const config = require('config')
 const express = require('express')
-const bodyParser = require('body-parser')
-const _ = require('lodash')
 const cors = require('cors')
+const bodyParser = require('body-parser')
+const httpStatus = require('http-status-codes')
+const swaggerUi = require('swagger-ui-express')
+const YAML = require('yamljs')
+const routes = require('./src/routes')
 const logger = require('./src/common/logger')
-const HttpStatus = require('http-status-codes')
-const morgan = require('morgan')
 
-// setup express app
+
+
+const swaggerDocument = YAML.load('./docs/swagger.yaml')
 const app = express()
 
-app.use(cors())
-app.use(bodyParser.json())
-app.use(bodyParser.urlencoded({ extended: true }))
 app.set('port', config.PORT)
 
-// Request logger
-app.use(morgan('common', { skip: (req, res) => res.statusCode < 400 }))
+app.use(bodyParser.json())
+app.use(bodyParser.urlencoded({ extended: true }))
+app.use(cors())
 
-// Register routes
 require('./app-routes')(app)
 
-// The error handler
-// eslint-disable-next-line no-unused-vars
+// Serve Swagger in /docs end point
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument))
+// Error handler
 app.use((err, req, res, next) => {
-  logger.logFullError(err, req.signature || `${req.method} ${req.url}`)
-  const errorResponse = {}
-  const status = err.isJoi ? HttpStatus.BAD_REQUEST : (err.httpStatus || HttpStatus.INTERNAL_SERVER_ERROR)
-
-  if (_.isArray(err.details)) {
-    if (err.isJoi) {
-      _.map(err.details, (e) => {
-        if (e.message) {
-          if (_.isUndefined(errorResponse.message)) {
-            errorResponse.message = e.message
-          } else {
-            errorResponse.message += `, ${e.message}`
-          }
-        }
-      })
-    }
+  if (err.isJoi) {
+    res.status(httpStatus.BAD_REQUEST).json({
+      message: err.details[0].message
+    })
+  } else if (err.errors) {
+    res.status(httpStatus.BAD_REQUEST).json({ message: err.errors })
+  } else {
+    const statusCode = err.statusCode || httpStatus.INTERNAL_SERVER_ERROR
+    res.status(statusCode).json({ message: err.message || config.DEFAULT_MESSAGE })
   }
-  if (_.isUndefined(errorResponse.message)) {
-    if (err.message && status !== HttpStatus.INTERNAL_SERVER_ERROR) {
-      errorResponse.message = err.message
-    } else {
-      errorResponse.message = 'Internal server error'
-    }
-  }
+})
 
-  res.status(status).json(errorResponse)
+// Check if the route is not found or HTTP method is not supported
+app.use('*', (req, res) => {
+  const pathKey = req.baseUrl.substring(config.API_PREFIX.length)
+  const route = routes[pathKey]
+  if (route) {
+    res.status(httpStatus.METHOD_NOT_ALLOWED).json({ message: 'The requested HTTP method is not supported.' })
+  } else {
+    res.status(httpStatus.NOT_FOUND).json({ message: 'The requested resource cannot be found.' })
+  }
 })
 
 app.listen(app.get('port'), () => {
-  logger.info(`Express server listening on port ${app.get('port')}`)
+  logger.debug(`Express server listening on port ${app.get('port')}`)
 })
+
+module.exports = app

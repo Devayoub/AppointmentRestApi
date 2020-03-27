@@ -24,16 +24,19 @@ const logger = createLogger({
 /**
  * Log error details with signature
  * @param err the error
- * @param signature the signature
+ * @param signature The signature
  */
 logger.logFullError = (err, signature) => {
   if (!err) {
     return
   }
+
   if (signature) {
     logger.error(`Error happened in ${signature}`)
   }
+
   logger.error(util.inspect(err))
+
   if (!err.logged) {
     logger.error(err.stack)
     err.logged = true
@@ -51,7 +54,7 @@ const _sanitizeObject = (obj) => {
     return JSON.parse(JSON.stringify(obj, (name, value) => {
       // Array of field names that should not be logged
       // add field if necessary (password, tokens etc)
-      const removeFields = ['password', 'passwordHash', 'verificationCode', 'email', 'accessToken']
+      const removeFields = ['password', 'token', 'sessionId', 'gpSessionId']
       if (_.includes(removeFields, name)) {
         return '<removed>'
       }
@@ -97,8 +100,8 @@ logger.decorateWithLogging = (service) => {
       try {
         const result = await method.apply(this, arguments)
         logger.debug(`EXIT ${name}`)
-        logger.debug('output arguments')
         if (result !== null && result !== undefined) {
+          logger.debug('output arguments')
           logger.debug(util.inspect(_sanitizeObject(result)))
         }
         return result
@@ -107,6 +110,7 @@ logger.decorateWithLogging = (service) => {
         throw e
       }
     }
+    service[name].params = params
   })
 }
 
@@ -116,15 +120,16 @@ logger.decorateWithLogging = (service) => {
  * Service method must have a `schema` property with Joi schema
  * @param {Object} service the service
  */
-logger.decorateWithValidators = function (service) {
+logger.decorateWithValidators = (service) => {
   _.each(service, (method, name) => {
     if (!method.schema) {
       return
     }
-    const params = getParams(method)
+    const params = method.params || getParams(method)
     service[name] = async function () {
       const args = Array.prototype.slice.call(arguments)
       const value = _combineObject(params, args)
+
       const normalized = Joi.attempt(value, method.schema)
 
       const newArgs = []
@@ -134,7 +139,8 @@ logger.decorateWithValidators = function (service) {
       _.each(params, (param) => {
         newArgs.push(normalized[param])
       })
-      return method.apply(this, newArgs)
+
+      return method.apply(this, args)
     }
     service[name].params = params
   })
@@ -146,6 +152,7 @@ logger.decorateWithValidators = function (service) {
  */
 logger.buildService = (service) => {
   logger.decorateWithValidators(service)
+
   logger.decorateWithLogging(service)
 }
 

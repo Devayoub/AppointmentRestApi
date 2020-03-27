@@ -1,32 +1,43 @@
+const _ = require('lodash')
+const { Roles } = require('../constants')
 const mongoose = require('mongoose')
-const config = require('config')
 
 /**
- * The Appointment schema.
+ * The User schema.
+ * @class User
+ *
+ * A user of the application.  Can either be patient and/or physician and/or  admin
  */
 const schema = new mongoose.Schema({
-  eventId: {
+
+  clientId: {
     required: true,
-    type: String,
-    unique: true
+    type: String
   },
   providerId: {
     required: true,
     type: String
+
   },
-  patientId: {
-    required: true,
-    type: String
-  },
-  meetingId: {
+  password: {
     required: false,
     type: String
   },
-  meetingPassword: {
+
+  event_client_id: {
     required: false,
     type: String
+  },
+  event_provider_id: {
+    required: false,
+    type: String
+  },
+  status: {
+    required: false,
+    type: String
+
   }
-}, { timestamps: true })
 
+})
 
-module.exports = schema
+module.exports = mongoose.model('Appointment', schema)
